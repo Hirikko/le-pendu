@@ -1,3 +1,4 @@
+
 function MakeLetters(Game,x,y)
 
     local current_db_index = 34 + 28
@@ -122,7 +123,6 @@ function MakeLetters(Game,x,y)
         local end_frame     = start_frame + total_frames
         local completion    = (frame - start_frame) / total_frames
 
-        -- clamp completion between 0 and 1
         if completion < 0 then completion = 0 end
         if completion > 1 then completion = 1 end
 
@@ -131,7 +131,7 @@ function MakeLetters(Game,x,y)
         end
 
         local dx = math.floor(strong_ease_out(completion) * total_x_change)
-        hints_timming[y][2] = total_x_change -  dx
+        hints_timming[y][2] = total_x_change - dx
     end
 
     local function _draw_hints_bg(y, frame)
@@ -144,7 +144,6 @@ function MakeLetters(Game,x,y)
     end
 
     local function _draw_hints(frame)
-
         if debug and ui.btnp(BTN_E, 2) then
             current_db_index = current_db_index + 1
             word, hints = _get_word_from_db()
@@ -172,25 +171,24 @@ function MakeLetters(Game,x,y)
 
         if debug or #letters_wrong >= 3 then
             local dx = hints_timming[0][2]
-            ui.print(hints[1], dx + lt.x + 5, lt.y + 73, 0x41F0)
-            ui.print(hints[1], dx + lt.x + 5, lt.y + 74, 0x7FFF)
+            ui.print(hints[1], dx + lt.x + 4, lt.y + 75, 0x7E80)
+            ui.print(hints[1], dx + lt.x + 5, lt.y + 76, 0x41F0)
         end
 
         if debug or #letters_wrong >= 6 then
             local dx = hints_timming[1][2]
-            ui.print(hints[2], dx + lt.x + 5, lt.y + 93, 0x41F0)
-            ui.print(hints[2], dx + lt.x + 5, lt.y + 94, 0x7FFF)
+            ui.print(hints[2], dx + lt.x + 4, lt.y + 95, 0x7E80)
+            ui.print(hints[2], dx + lt.x + 5, lt.y + 96, 0x41F0)
         end
 
         if debug or #letters_wrong >= 9 then
             local dx = hints_timming[2][2]
-            ui.print(hints[3], dx + lt.x + 5, lt.y + 113, 0x41F0)
-            ui.print(hints[3], dx + lt.x + 5, lt.y + 114, 0x7FFF)
+            ui.print(hints[3], dx + lt.x + 4, lt.y + 115, 0x7E80)
+            ui.print(hints[3], dx + lt.x + 5, lt.y + 116, 0x41F0)
         end
     end
 
     lt.draw = function(frame)
-
         if not word then
             word, hints = _get_word_from_db()
         end
@@ -223,7 +221,7 @@ function MakeLetters(Game,x,y)
                 if wrong_char then
                     local sx, sy = _get_shake_offset(wrong_char, frame)
                     ui.print(wrong_char,
-                    lt.x + 12 + 32 * lx + sx, lt.y + 11  + 32 * ly + sy, 0x7FFF)
+                    lt.x + 12 + 32 * lx + sx, lt.y + 11 + 32 * ly + sy, 0x7FFF)
                 end
             end
         end
@@ -234,13 +232,13 @@ function MakeLetters(Game,x,y)
             local sprite_index = char_code - string.byte('A')
 
             local text_width = #word * 16
-            local text_start = 480 / 2 - text_width / 2
+            local text_start = 480 / 2 - text_width / 2 - 110
             local sx, sy = _get_shake_offset(char, frame)
             if is_guessed(char) or lt.is_game_over() then
-                ui.tile(Sprites.sprites.letras, sprite_index, text_start + (i - 1) * 16 + sx, 216 + sy)
-                ui.tile(Sprites.sprites.letras, 26, text_start + (i - 1) * 16 + sx, 216 + 8 + sy)
+                ui.tile(Sprites.sprites.letras, sprite_index, text_start + (i - 1) * 16 + sx, 202 + sy)
+                ui.tile(Sprites.sprites.letras, 26, text_start + (i - 1) * 16 + sx, 202 + 8 + sy)
             else
-                ui.tile(Sprites.sprites.letras, 27, text_start + (i - 1) * 16 + sx, 216 + 8 + sy)
+                ui.tile(Sprites.sprites.letras, 27, text_start + (i - 1) * 16 + sx, 202 + 8 + sy)
             end
         end
 
