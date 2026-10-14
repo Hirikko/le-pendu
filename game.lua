@@ -1,249 +1,391 @@
 
-function MakeLetters(Game,x,y)
+collectgarbage("generational")
 
-    local current_db_index = 34 + 28
-    local debug = false
-    local word, hints = nil, nil
-    local letters_right = {}
-    local letters_wrong = {}
-    local letters_wrong_timming = {}
-    local letters_shake_timing = {}
-    local hints_timming = {}
-    local lt = {
-        x = x,
-        y = y
+Director = require("director")
+Helpers = require("helpers")
+local BTN = require("btn")
+
+require("palette")
+require("sprites")
+require("skull")
+require("letters")
+require("bg")
+require("database")
+
+Frame = 0
+
+Game = {
+    state = "playing",
+    keyboard = {
+        letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        selected = 1,
+        used = {}
+    }
+}
+
+Game.skull = MakeSkull(Game, 66, 56)
+Game.letters = MakeLetters(Game, 290, 52)
+Game.bg = MakeBackground(Game, 0, 0)
+
+local KEYBOARD = {
+    y = 184,
+    key_width = 22,
+    key_height = 16,
+    gap = 2,
+    rows = {
+        {1, 9},
+        {10, 18},
+        {19, 26}
+    }
+}
+
+local KEY_REPEAT_DELAY = 15
+local KEY_REPEAT_INTERVAL = 5
+
+local navigation = {
+    direction = nil,
+    held_frames = 0
+}
+
+local function is_available(index)
+    local letter = Game.keyboard.letters:sub(index, index)
+    return letter ~= "" and not Game.keyboard.used[letter]
+end
+
+local function find_available(start, step, limit)
+    local index = start
+
+    for _ = 1, limit do
+        index = ((index - 1 + step) % limit) + 1
+
+        if is_available(index) then
+            return index
+        end
+    end
+
+    return nil
+end
+
+local function get_row(index)
+    for row_index, row in ipairs(KEYBOARD.rows) do
+        if index >= row[1] and index <= row[2] then
+            return row_index
+        end
+    end
+
+    return nil
+end
+
+local function move_horizontal(direction)
+    local selected = Game.keyboard.selected
+    local row_index = get_row(selected)
+    local row = KEYBOARD.rows[row_index]
+    local first = row[1]
+    local last = row[2]
+    local count = last - first + 1
+    local column = selected - first + 1
+
+    for _ = 1, count - 1 do
+        column = ((column - 1 + direction) % count) + 1
+
+        local index = first + column - 1
+
+        if is_available(index) then
+            Game.keyboard.selected = index
+            return
+        end
+    end
+end
+
+local function move_vertical(direction)
+    local selected = Game.keyboard.selected
+    local row_index = get_row(selected)
+    local current_row = KEYBOARD.rows[row_index]
+    local column = selected - current_row[1] + 1
+
+    for _ = 1, #KEYBOARD.rows - 1 do
+        row_index = ((row_index - 1 + direction) % #KEYBOARD.rows) + 1
+
+        local row = KEYBOARD.rows[row_index]
+        local row_count = row[2] - row[1] + 1
+        local target_column = math.min(column, row_count)
+        local index = row[1] + target_column - 1
+
+        if is_available(index) then
+            Game.keyboard.selected = index
+            return
+        end
+
+        for offset = 1, row_count - 1 do
+            local right_index = row[1]
+                + ((target_column - 1 + offset) % row_count)
+
+            if is_available(right_index) then
+                Game.keyboard.selected = right_index
+                return
+            end
+
+            local left_index = row[1]
+                + ((target_column - 1 - offset) % row_count)
+
+            if is_available(left_index) then
+                Game.keyboard.selected = left_index
+                return
+            end
+        end
+    end
+end
+
+local function update_navigation()
+    local directions = {
+        {name = "left", button = BTN.LEFT, move = function()
+            move_horizontal(-1)
+        end},
+        {name = "right", button = BTN.RIGHT, move = function()
+            move_horizontal(1)
+        end},
+        {name = "up", button = BTN.UP, move = function()
+            move_vertical(-1)
+        end},
+        {name = "down", button = BTN.DOWN, move = function()
+            move_vertical(1)
+        end}
     }
 
-    local function _get_word_from_db()
-        local db = Database
-        if debug then
-            return db[current_db_index].word, db[current_db_index].hints
-        end
+    local active_direction = nil
 
-        math.randomseed(os.time() + Frame)
-        current_db_index = math.random(1, #db)
-        return db[current_db_index].word, db[current_db_index].hints
+    for _, direction in ipairs(directions) do
+        if ui.btn(direction.button) then
+            active_direction = direction
+            break
+        end
     end
 
-    local function is_guessed(char)
-        local guessed = letters_right
-        for i = 1, #guessed do
-            if guessed[i] == char then return true end
-        end
-        return false
+    if not active_direction then
+        navigation.direction = nil
+        navigation.held_frames = 0
+        return
     end
 
-    local function _get_shake_offset(char, frame)
-        local start_f = letters_shake_timing[char]
-        if not start_f then return 0, 0 end
-        local elapsed = frame - start_f
-        if elapsed < 0 or elapsed >= 15 then return 0, 0 end
-        local intensity = (15 - elapsed) / 15
+    if navigation.direction ~= active_direction.name then
+        navigation.direction = active_direction.name
+        navigation.held_frames = 0
+        active_direction.move()
+        return
+    end
 
-        if is_guessed(char) then
-            local sx = 0
-            local sy = math.floor(math.sin(elapsed * 2.5) * 4 * intensity)
-            return sx, sy
+    navigation.held_frames = navigation.held_frames + 1
+
+    if navigation.held_frames >= KEY_REPEAT_DELAY
+        and (navigation.held_frames - KEY_REPEAT_DELAY)
+            % KEY_REPEAT_INTERVAL == 0 then
+        active_direction.move()
+    end
+end
+
+local function update_keyboard()
+    update_navigation()
+
+    if ui.btnp(BTN.Z) then
+        local selected = Game.keyboard.selected
+        local letter = Game.keyboard.letters:sub(selected, selected)
+
+        if is_available(selected) then
+            Game.keyboard.used[letter] = true
+            Game.letters.try_letter(letter, Frame)
+
+            local next_index = find_available(
+                selected,
+                1,
+                #Game.keyboard.letters
+            )
+
+            if next_index then
+                Game.keyboard.selected = next_index
+            end
+        end
+    end
+end
+
+local function draw_keyboard()
+    local letters = Game.keyboard.letters
+
+    for row_index, row in ipairs(KEYBOARD.rows) do
+        local first = row[1]
+        local last = row[2]
+
+        local row_width = (last - first + 1)
+            * (KEYBOARD.key_width + KEYBOARD.gap)
+            - KEYBOARD.gap
+
+        local start_x = math.floor(
+            (480 - row_width) / 2
+        ) + 110
+
+        local y = KEYBOARD.y
+            + (row_index - 1)
+            * (KEYBOARD.key_height + KEYBOARD.gap)
+
+        for index = first, last do
+            local column = index - first
+
+            local x = start_x
+                + column
+                * (KEYBOARD.key_width + KEYBOARD.gap)
+
+            local letter = letters:sub(index, index)
+            local selected = index == Game.keyboard.selected
+            local used = Game.keyboard.used[letter]
+
+            local background = 0x2108
+            local foreground = 0x7FFF
+            local border = 0x6C1F
+
+            if used then
+                background = 0x1004
+                foreground = 0x4210
+                border = 0x2108
+            elseif selected then
+                background = 0x6C1F
+                foreground = 0x0000
+                border = 0x7FFF
+            end
+
+            ui.rectfill(
+                x,
+                y,
+                x + KEYBOARD.key_width,
+                y + KEYBOARD.key_height,
+                background
+            )
+
+            ui.rect(
+                x,
+                y,
+                x + KEYBOARD.key_width,
+                y + KEYBOARD.key_height,
+                border
+            )
+
+            ui.print(
+                letter,
+                x + 8,
+                y + 5,
+                foreground
+            )
+        end
+    end
+
+    ui.print(
+        "SETAS: MOVER   Z: CONFIRMAR",
+        160,
+        246,
+        0x5117
+    )
+end
+
+local function draw_palette(brightness)
+    for i = 1, #Palette do
+        local color = Palette[i]
+        local r = color & 0x1F
+        local g = (color & 0x3E0) >> 5
+        local b = (color & 0x7C00) >> 10
+
+        r = math.floor(r * brightness)
+        g = math.floor(g * brightness)
+        b = math.floor(b * brightness)
+
+        ui.palset(i - 1, r | (g << 5) | (b << 10))
+    end
+end
+
+local function reset_game()
+    Game.letters.reset()
+    Game.skull.reset()
+
+    Game.keyboard.selected = 1
+    Game.keyboard.used = {}
+    navigation.direction = nil
+    navigation.held_frames = 0
+
+    Director.fade_in(30)
+    Game.state = "playing"
+end
+
+Director.fade_in(30)
+
+function update()
+    Frame = Frame + 1
+    Director.update()
+
+    ui.cls(1)
+    ui.clip(0, 0, 480, 270)
+
+    draw_palette(Director.get_brightness())
+
+    Game.bg.draw(Frame)
+    Game.skull.draw(Frame)
+    Game.letters.draw(Frame)
+
+    if Game.state == "playing" then
+        update_keyboard()
+        draw_keyboard()
+
+        if Game.letters.is_word_guessed() then
+            Game.state = "won"
+            Game.state_start_frame = Frame
+        elseif Game.letters.is_game_over() then
+            Game.state = "lost"
+            Game.state_start_frame = Frame
+        end
+
+    elseif Game.state == "won" or Game.state == "lost" then
+        local elapsed = Frame - (Game.state_start_frame or Frame)
+        local ease = Helpers.ease_out_cubic(elapsed / 25)
+
+        local title_y = math.floor(-30 + 40 * ease)
+        local sub_y = math.floor(285 - 35 * ease)
+
+        if Game.state == "won" then
+            Helpers.print_sine_centered(
+                "ACERTOU!",
+                title_y,
+                Frame,
+                0x7FCD,
+                0x313F
+            )
+
+            Helpers.print_centered(
+                "APERTE Z PARA JOGAR DE NOVO",
+                sub_y,
+                0x7E80,
+                0x313F
+            )
         else
-            local sx = math.floor(math.sin(elapsed * 2.5) * 4 * intensity)
-            local sy = math.floor(math.cos(elapsed * 3.1) * 2 * intensity)
-            return sx, sy
+            Helpers.print_sine_centered(
+                "OPS! ERROU!",
+                title_y,
+                Frame,
+                0x7E80,
+                0x313F
+            )
+
+            Helpers.print_centered(
+                "APERTE Z PARA TENTAR DE NOVO",
+                sub_y,
+                0x7E80,
+                0x313F
+            )
+        end
+
+        if ui.btnp(BTN.Z) or ui.btnp(BTN.X) then
+            Director.fade_out(30)
+            Game.state = "fading_out"
+        end
+
+    elseif Game.state == "fading_out" then
+        if not Director.is_fading() then
+            reset_game()
         end
     end
-
-    lt.reset = function()
-        letters_right = {}
-        letters_wrong = {}
-        letters_wrong_timming = {}
-        letters_shake_timing = {}
-        hints_timming = {}
-        word, hints = _get_word_from_db()
-    end
-
-    lt.is_word_guessed = function()
-        if not word or #word == 0 then return false end
-        for i = 1, #word do
-            local char = word:sub(i, i)
-            if not is_guessed(char) then return false end
-        end
-        return true
-    end
-
-    lt.is_game_over = function()
-        return #letters_wrong >= 10
-    end
-
-    lt.get_word = function()
-        return word
-    end
-
-    lt.try_letter = function(letter, frame)
-        if lt.is_word_guessed() or lt.is_game_over() then return end
-
-        letter = string.upper(letter)
-        if #letter ~= 1 then return end
-        if letter < 'A' or letter > 'Z' then return end
-
-        local guessed = letters_right
-        local wrong = letters_wrong
-
-        for i = 1, #word do
-            if word:sub(i,i) == letter then
-                for j = 1, #guessed do
-                    if guessed[j] == letter then
-                        letters_shake_timing[letter] = frame
-                        return
-                    end
-                end
-                table.insert(letters_right, letter)
-                return
-            end
-        end
-
-        for j = 1, #wrong do
-            if wrong[j] == letter then
-                letters_shake_timing[letter] = frame
-                return
-            end
-        end
-
-        table.insert(letters_wrong, letter)
-        letters_wrong_timming[letter] = frame
-        Game.skull.add_one_more_bodypart()
-    end
-
-    local function _update_hints_timming(y, frame)
-        if hints_timming[y] == nil then
-            hints_timming[y] = {frame, 0}
-        end
-
-        local total_x_change = 210
-        local total_frames   = 60
-        local start_frame   = hints_timming[y][1]
-        local end_frame     = start_frame + total_frames
-        local completion    = (frame - start_frame) / total_frames
-
-        if completion < 0 then completion = 0 end
-        if completion > 1 then completion = 1 end
-
-        local function strong_ease_out(t)
-            return 1 - (1 - t) * (1 - t) * (1 - t)
-        end
-
-        local dx = math.floor(strong_ease_out(completion) * total_x_change)
-        hints_timming[y][2] = total_x_change - dx
-    end
-
-    local function _draw_hints_bg(y, frame)
-        local dx = hints_timming[y] and hints_timming[y][2] or 120
-        ui.tile(Sprites.sprites.dicas, 0, dx + lt.x - 7, lt.y + 72 + y * 20)
-        for x = 1, 9 do
-            ui.tile(Sprites.sprites.dicas, 1, dx + lt.x - 7 + x * 16, lt.y + 72 + y * 20)
-        end
-        ui.tile(Sprites.sprites.dicas, 2, dx + lt.x - 7 + 10 * 16, lt.y + 72 + y * 20)
-    end
-
-    local function _draw_hints(frame)
-        if debug and ui.btnp(BTN_E, 2) then
-            current_db_index = current_db_index + 1
-            word, hints = _get_word_from_db()
-        end
-
-        if debug and ui.btnp(BTN_Q, 2) then
-            current_db_index = current_db_index - 1
-            word, hints = _get_word_from_db()
-        end
-
-        if debug or #letters_wrong >= 3 then
-            _update_hints_timming(0, frame)
-            _draw_hints_bg(0, frame)
-        end
-
-        if debug or #letters_wrong >= 6 then
-            _update_hints_timming(1, frame)
-            _draw_hints_bg(1, frame)
-        end
-
-        if debug or #letters_wrong >= 9 then
-            _update_hints_timming(2, frame)
-            _draw_hints_bg(2, frame)
-        end
-
-        if debug or #letters_wrong >= 3 then
-            local dx = hints_timming[0][2]
-            ui.print(hints[1], dx + lt.x + 4, lt.y + 75, 0x7E80)
-            ui.print(hints[1], dx + lt.x + 5, lt.y + 76, 0x41F0)
-        end
-
-        if debug or #letters_wrong >= 6 then
-            local dx = hints_timming[1][2]
-            ui.print(hints[2], dx + lt.x + 4, lt.y + 95, 0x7E80)
-            ui.print(hints[2], dx + lt.x + 5, lt.y + 96, 0x41F0)
-        end
-
-        if debug or #letters_wrong >= 9 then
-            local dx = hints_timming[2][2]
-            ui.print(hints[3], dx + lt.x + 4, lt.y + 115, 0x7E80)
-            ui.print(hints[3], dx + lt.x + 5, lt.y + 116, 0x41F0)
-        end
-    end
-
-    lt.draw = function(frame)
-        if not word then
-            word, hints = _get_word_from_db()
-        end
-
-        for ly = 0, 1 do
-            for lx = 0, 4 do
-                if not letters_wrong[lx+1+ly*5] then
-                    ui.circfill(lt.x + 16 + 32 * lx, lt.y + 16 + 32 * ly, 6, 0x31D1)
-                end
-            end
-        end
-
-        for ly = 0, 1 do
-            for lx = 0, 4 do
-                local wrong_char = letters_wrong[lx+1+ly*5]
-                if wrong_char then
-                    local sx, sy = _get_shake_offset(wrong_char, frame)
-                    local time_since_wrong = frame - letters_wrong_timming[wrong_char]
-                    local sprite_frame = math.floor(time_since_wrong / 2)
-                    if sprite_frame > 2 then sprite_frame = 2 end
-                    ui.tile(Sprites.sprites.bgletras, sprite_frame + ly * 3,
-                    lt.x + 32 * lx + sx, lt.y + 32 * ly + sy)
-                end
-            end
-        end
-
-        for ly = 0, 1 do
-            for lx = 0, 4 do
-                local wrong_char = letters_wrong[lx+1+ly*5]
-                if wrong_char then
-                    local sx, sy = _get_shake_offset(wrong_char, frame)
-                    ui.print(wrong_char,
-                    lt.x + 12 + 32 * lx + sx, lt.y + 11 + 32 * ly + sy, 0x7FFF)
-                end
-            end
-        end
-
-        for i = 1, #word do
-            local char = word:sub(i, i)
-            local char_code = string.byte(char)
-            local sprite_index = char_code - string.byte('A')
-
-            local text_width = #word * 16
-            local text_start = 480 / 2 - text_width / 2 - 110
-            local sx, sy = _get_shake_offset(char, frame)
-            if is_guessed(char) or lt.is_game_over() then
-                ui.tile(Sprites.sprites.letras, sprite_index, text_start + (i - 1) * 16 + sx, 202 + sy)
-                ui.tile(Sprites.sprites.letras, 26, text_start + (i - 1) * 16 + sx, 202 + 8 + sy)
-            else
-                ui.tile(Sprites.sprites.letras, 27, text_start + (i - 1) * 16 + sx, 202 + 8 + sy)
-            end
-        end
-
-        _draw_hints(frame)
-    end
-
-    return lt
 end
